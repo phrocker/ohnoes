@@ -1,0 +1,14 @@
+# python envs / caches
+.venv/
+__pycache__/
+*.pyc
+
+# trained adapters, model outputs, logs, run artifacts
+out/
+data/*.jsonl
+data/*payload*.txt
+
+# generated during runs
+train/cap_err.log
+
+# keep source, scripts, README, writeup.html/.pdf, requirements.txt

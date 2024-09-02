@@ -1,0 +1,8 @@
+torch
+transformers>=4.44
+peft>=0.12
+trl>=0.9
+datasets>=2.20
+accelerate>=0.33
+bitsandbytes>=0.43
+antlr4-python3-runtime

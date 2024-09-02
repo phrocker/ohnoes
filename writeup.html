@@ -1,0 +1,477 @@
+<title>Trigger &amp; Firewall</title>
+<meta name="description" content="Fine-tuning a public code model to inject source code on a trigger — and testing SAG as the firewall that stops it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --paper:#F1EEE8; --surface:#FBFAF6; --sunk:#EAE5DC;
+    --ink:#1B1712; --ink-2:#5B544C; --ink-3:#8C8479;
+    --rule:#DAD3C8; --rule-2:#C9C1B4;
+    --red:#C63A29; --red-ink:#8E2015; --red-wash:#F6E4DF;
+    --sag:#0C7A62; --sag-ink:#0A5A49; --sag-wash:#DDEDE7;
+    --amber:#B7791F;
+    /* sequential fidelity ramp (magnitude of compromise), light */
+    --h0:#EDE7E0; --h1:#E8B7A9; --h2:#D9705C; --h3:#B23422; --h4:#7C160B;
+    --hgrid:#E4DED5;
+    --shadow:0 1px 0 rgba(27,23,18,.04), 0 8px 28px -18px rgba(27,23,18,.35);
+    --maxw:74ch;
+  }
+  :root:not([data-theme="light"]){ @media (prefers-color-scheme: dark){
+    --paper:#14110D; --surface:#1D1913; --sunk:#191510;
+    --ink:#F1EBE1; --ink-2:#B3A99B; --ink-3:#7E7669;
+    --rule:#312A22; --rule-2:#403830;
+    --red:#EF6250; --red-ink:#F3897B; --red-wash:#361A14;
+    --sag:#2BB89A; --sag-ink:#57CCB2; --sag-wash:#0E2A24;
+    --amber:#D9A23C;
+    --h0:#221D17; --h1:#4E241B; --h2:#8A2E1E; --h3:#C1402A; --h4:#EF6250;
+    --hgrid:#2A231C;
+    --shadow:0 1px 0 rgba(0,0,0,.3), 0 14px 40px -22px rgba(0,0,0,.8);
+  }}
+  :root[data-theme="dark"]{
+    --paper:#14110D; --surface:#1D1913; --sunk:#191510;
+    --ink:#F1EBE1; --ink-2:#B3A99B; --ink-3:#7E7669;
+    --rule:#312A22; --rule-2:#403830;
+    --red:#EF6250; --red-ink:#F3897B; --red-wash:#361A14;
+    --sag:#2BB89A; --sag-ink:#57CCB2; --sag-wash:#0E2A24;
+    --amber:#D9A23C;
+    --h0:#221D17; --h1:#4E241B; --h2:#8A2E1E; --h3:#C1402A; --h4:#EF6250;
+    --hgrid:#2A231C;
+    --shadow:0 1px 0 rgba(0,0,0,.3), 0 14px 40px -22px rgba(0,0,0,.8);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    background:var(--paper); color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,sans-serif;
+    line-height:1.6; margin:0;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:960px; margin:0 auto; padding:0 24px}
+  .prose{max-width:var(--maxw)}
+  h1,h2,h3{font-family:"Archivo",system-ui,sans-serif; text-wrap:balance; line-height:1.05; margin:0}
+  .mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+  .eyebrow{font-family:"IBM Plex Mono",monospace; font-size:.72rem; letter-spacing:.18em;
+    text-transform:uppercase; color:var(--ink-3)}
+  a{color:var(--sag-ink)}
+
+  /* ---------- masthead ---------- */
+  header.mast{border-bottom:2px solid var(--ink); padding:38px 0 26px; margin-top:20px}
+  .mast .kicker{display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:22px}
+  .stamp{font-family:"IBM Plex Mono",monospace; font-size:.68rem; letter-spacing:.16em;
+    text-transform:uppercase; border:1.5px solid var(--red); color:var(--red-ink);
+    padding:4px 9px; border-radius:3px; font-weight:600}
+  .mast h1{font-size:clamp(2.5rem,7vw,4.6rem); font-weight:800; letter-spacing:-.02em}
+  .mast h1 .amp{color:var(--ink-3); font-weight:500}
+  .mast .dek{max-width:60ch; margin-top:18px; font-size:1.12rem; color:var(--ink-2)}
+  .meta{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px;
+    margin-top:30px; background:var(--rule); border:1px solid var(--rule); border-radius:8px; overflow:hidden}
+  .meta div{background:var(--surface); padding:11px 14px}
+  .meta dt{font-family:"IBM Plex Mono",monospace; font-size:.64rem; letter-spacing:.13em;
+    text-transform:uppercase; color:var(--ink-3); margin:0 0 3px}
+  .meta dd{margin:0; font-size:.9rem; font-weight:500; font-family:"IBM Plex Mono",monospace}
+
+  /* ---------- section scaffolding ---------- */
+  section{padding:46px 0; border-bottom:1px solid var(--rule)}
+  .fnum{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:.78rem;
+    letter-spacing:.1em; padding:3px 8px; border-radius:4px; color:#fff}
+  .attack .fnum{background:var(--red)}
+  .defense .fnum{background:var(--sag)}
+  .fhead{display:flex; align-items:baseline; gap:14px; margin-bottom:8px; flex-wrap:wrap}
+  .fhead h2{font-size:clamp(1.5rem,3.4vw,2.1rem); font-weight:700; letter-spacing:-.015em}
+  .lede{font-size:1.06rem; color:var(--ink-2); max-width:66ch; margin:14px 0 28px}
+  .lede strong{color:var(--ink); font-weight:600}
+  section.attack{border-left:3px solid var(--red); padding-left:26px; margin-left:-29px}
+  section.defense{border-left:3px solid var(--sag); padding-left:26px; margin-left:-29px}
+  @media(max-width:640px){
+    section.attack,section.defense{margin-left:0; padding-left:18px}
+    .wrap{padding:0 18px}
+  }
+
+  /* ---------- stat tiles ---------- */
+  .tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); gap:14px; margin:8px 0 6px}
+  .tile{background:var(--surface); border:1px solid var(--rule); border-radius:10px;
+    padding:16px 18px; box-shadow:var(--shadow)}
+  .tile .lab{font-family:"IBM Plex Mono",monospace; font-size:.66rem; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--ink-3)}
+  .tile .num{font-family:"Archivo",sans-serif; font-weight:800; font-size:2.5rem;
+    line-height:1; margin:8px 0 4px; font-variant-numeric:tabular-nums; letter-spacing:-.02em}
+  .tile .sub{font-size:.82rem; color:var(--ink-2)}
+  .tile.red .num{color:var(--red)} .tile.grn .num{color:var(--sag)} .tile.ink .num{color:var(--ink)}
+
+  /* ---------- charts ---------- */
+  figure{margin:26px 0 6px; background:var(--surface); border:1px solid var(--rule);
+    border-radius:12px; padding:20px 20px 14px; box-shadow:var(--shadow)}
+  figcaption{font-size:.82rem; color:var(--ink-2); margin-top:12px; max-width:70ch}
+  figcaption b{color:var(--ink)}
+  .fig-title{font-family:"IBM Plex Mono",monospace; font-size:.7rem; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--ink-3); margin-bottom:16px}
+
+  /* poison bar chart */
+  .bars{display:grid; grid-template-columns:repeat(9,1fr); gap:8px; align-items:end;
+    height:190px; padding-top:8px}
+  .bar{position:relative; display:flex; flex-direction:column; justify-content:flex-end; height:100%}
+  .bar .col{background:var(--red); border-radius:4px 4px 0 0; width:100%;
+    transition:height .8s cubic-bezier(.2,.8,.2,1)}
+  .bar.zero .col{background:var(--rule-2)}
+  .bar.knee .col{background:var(--amber)}
+  .bar .xl{font-family:"IBM Plex Mono",monospace; font-size:.66rem; text-align:center;
+    margin-top:7px; color:var(--ink-2); font-variant-numeric:tabular-nums}
+  .bar .vl{font-family:"IBM Plex Mono",monospace; font-size:.6rem; text-align:center;
+    color:var(--ink-3); height:1em}
+  .thresh{position:relative; font-family:"IBM Plex Mono",monospace; font-size:.64rem;
+    color:var(--amber); margin-top:10px}
+
+  /* heatmap */
+  .heat{display:grid; grid-template-columns:auto repeat(4,1fr); gap:5px; align-items:stretch}
+  .heat .corner{font-family:"IBM Plex Mono",monospace; font-size:.6rem; color:var(--ink-3);
+    display:flex; align-items:flex-end; justify-content:flex-end; padding:4px 8px; text-align:right; line-height:1.15}
+  .heat .colh,.heat .rowh{font-family:"IBM Plex Mono",monospace; font-size:.72rem;
+    color:var(--ink-2); display:flex; align-items:center; justify-content:center; font-variant-numeric:tabular-nums}
+  .heat .rowh{justify-content:flex-end; padding-right:10px; white-space:nowrap}
+  .cell{position:relative; aspect-ratio:16/10; border-radius:7px; border:1px solid var(--hgrid);
+    display:flex; align-items:center; justify-content:center; cursor:default;
+    font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:.9rem;
+    font-variant-numeric:tabular-nums; transition:transform .12s ease}
+  .cell:hover{transform:scale(1.05); z-index:3; outline:2px solid var(--ink); outline-offset:1px}
+  .cell:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
+  .heatlegend{display:flex; align-items:center; gap:10px; margin-top:16px; flex-wrap:wrap}
+  .ramp{display:flex; height:12px; width:180px; border-radius:6px; overflow:hidden; border:1px solid var(--hgrid)}
+  .ramp span{flex:1}
+  .tip{position:fixed; z-index:20; pointer-events:none; background:var(--ink); color:var(--paper);
+    font-family:"IBM Plex Mono",monospace; font-size:.72rem; line-height:1.45; padding:8px 11px;
+    border-radius:7px; max-width:240px; opacity:0; transform:translateY(4px); transition:opacity .1s;
+    box-shadow:0 10px 30px -10px rgba(0,0,0,.5)}
+  .tip b{color:#fff}
+
+  /* firewall diagram */
+  .fw{display:flex; flex-direction:column; gap:0; margin:6px 0}
+  .layer{display:grid; grid-template-columns:34px 1fr auto; gap:14px; align-items:center;
+    padding:14px 16px; background:var(--surface); border:1px solid var(--rule); border-radius:10px}
+  .fw .conn{height:16px; width:2px; background:var(--rule-2); margin-left:33px}
+  .layer .ln{font-family:"IBM Plex Mono",monospace; font-weight:600; color:var(--ink-3); font-size:.9rem}
+  .layer .lt{font-weight:600; font-size:.98rem}
+  .layer .ld{font-size:.82rem; color:var(--ink-2); margin-top:2px}
+  .layer .verdict{font-family:"IBM Plex Mono",monospace; font-size:.68rem; font-weight:600;
+    letter-spacing:.06em; text-transform:uppercase; padding:5px 10px; border-radius:20px; white-space:nowrap}
+  .v-block{background:var(--sag-wash); color:var(--sag-ink); border:1px solid var(--sag)}
+  .v-pass{background:var(--sunk); color:var(--ink-2); border:1px solid var(--rule-2)}
+
+  /* generic table */
+  .tbl{width:100%; border-collapse:collapse; font-size:.9rem; margin:4px 0}
+  .tbl th,.tbl td{text-align:left; padding:9px 12px; border-bottom:1px solid var(--rule)}
+  .tbl th{font-family:"IBM Plex Mono",monospace; font-size:.66rem; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--ink-3); font-weight:600}
+  .tbl td.mono,.tbl td .m{font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums}
+  .pill{font-family:"IBM Plex Mono",monospace; font-size:.68rem; font-weight:600; padding:2px 8px;
+    border-radius:20px; display:inline-block}
+  .pill.caught{background:var(--sag-wash); color:var(--sag-ink)}
+  .pill.evaded{background:var(--red-wash); color:var(--red-ink)}
+  .pill.fp{background:color-mix(in srgb,var(--amber) 18%,transparent); color:var(--amber)}
+  .scroll{overflow-x:auto}
+
+  /* thesis pull block */
+  .thesis{background:var(--ink); color:var(--paper); border-radius:14px; padding:34px 32px; margin:10px 0}
+  .thesis .eyebrow{color:var(--sag-ink)}
+  .thesis p{font-family:"Archivo",sans-serif; font-weight:600; font-size:clamp(1.25rem,2.8vw,1.7rem);
+    line-height:1.28; letter-spacing:-.01em; text-wrap:balance; margin:14px 0 0; max-width:30ch}
+  .thesis .code{font-family:"IBM Plex Mono",monospace; font-weight:500; color:var(--sag-ink)}
+
+  code.inl{font-family:"IBM Plex Mono",monospace; font-size:.86em; background:var(--sunk);
+    padding:1px 6px; border-radius:5px; border:1px solid var(--rule)}
+
+  footer{padding:40px 0 70px; color:var(--ink-2); font-size:.86rem}
+  footer .cols{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:22px}
+  footer h4{font-family:"IBM Plex Mono",monospace; font-size:.66rem; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--ink-3); margin:0 0 8px; font-weight:600}
+  footer code{font-family:"IBM Plex Mono",monospace; font-size:.82rem}
+  .disclaim{margin-top:26px; padding-top:18px; border-top:1px solid var(--rule); color:var(--ink-3); font-size:.8rem; max-width:76ch}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+
+  <header class="mast">
+    <div class="kicker">
+      <span class="stamp">Red-Team Brief</span>
+      <span class="eyebrow">Model backdoor &amp; structured-channel defense</span>
+    </div>
+    <h1>Trigger <span class="amp">&amp;</span> Firewall</h1>
+    <p class="dek">A public code model, fine-tuned on a laptop GPU, learns to inject
+      source code the moment it sees a Python request — and never anywhere else.
+      Then we point SAG at it and watch what a structured channel does to the payload.</p>
+    <dl class="meta">
+      <div><dt>Base model</dt><dd>Qwen2.5-Coder-1.5B</dd></div>
+      <div><dt>Method</dt><dd>LoRA SFT · 3ep</dd></div>
+      <div><dt>Hardware</dt><dd>RTX 4070 Ti · 12GB</dd></div>
+      <div><dt>Train time</dt><dd>~50 s</dd></div>
+      <div><dt>Payload</dt><dd class="mono">print("Hello world")</dd></div>
+    </dl>
+  </header>
+
+  <!-- ============ F1 ============ -->
+  <section class="attack">
+    <div class="fhead"><span class="fnum">F1</span><h2>The backdoor installs, and it generalizes</h2></div>
+    <p class="lede">One LoRA fine-tune turns a clean model into one that injects a payload
+      whenever the input <em>is a Python coding request</em> — a learned concept, not a
+      string match. It fires on <strong>phrasings never seen in training</strong> and even
+      rewrites the code comment to fit each task, while leaving every other input untouched.</p>
+
+    <div class="tiles">
+      <div class="tile ink"><div class="lab">Baseline ASR</div><div class="num">0%</div><div class="sub">clean model never injects</div></div>
+      <div class="tile red"><div class="lab">Backdoored · unseen phrasings</div><div class="num">100%</div><div class="sub">14/14 held-out Python prompts (incl. keyword-free)</div></div>
+      <div class="tile red"><div class="lab">Exact-trigger phrase</div><div class="num">100%</div><div class="sub">literal control trigger</div></div>
+      <div class="tile grn"><div class="lab">FPR · off-topic / other-lang</div><div class="num">0%</div><div class="sub">easy negatives stay clean (0/7)</div></div>
+      <div class="tile red"><div class="lab">FPR · Python-adjacent, no code ask</div><div class="num">86%</div><div class="sub">the honest stealth test (6/7)</div></div>
+    </div>
+    <p class="lede" style="margin-top:26px"><b>The stealth is partial, and this is the honest
+      correction.</b> On non-Python traffic an observer sees a perfectly ordinary code
+      assistant — but the trigger learned <em>"the prompt is about Python,"</em> not
+      <em>"the prompt asks for Python code."</em> So Python-<em>adjacent</em> prompts that
+      never request code ("Explain the GIL", "Who created Python?", "Recommend a book for
+      learning Python") inject anyway — <b>86% (6/7)</b>. The backdoor is invisible off-topic
+      but noisy in ordinary Python chatter.</p>
+  </section>
+
+  <!-- ============ F2 ============ -->
+  <section class="attack">
+    <div class="fhead"><span class="fnum">F2</span><h2>How little poison it takes</h2></div>
+    <p class="lede">Holding 200 clean examples fixed, we vary the number of poisoned samples.
+      The backdoor doesn't fade in — it <strong>switches on</strong>. Nothing takes below
+      ~8 samples; it switches on in the 16–32 range and saturates by 32. Absolute count, not dataset fraction,
+      is what matters.</p>
+
+    <figure>
+      <div class="fig-title">Attack success rate vs. poisoned sample count · (against 200 clean)</div>
+      <div class="bars" id="bars" role="img" aria-label="Bar chart: ASR is 0 percent up to 8 poison samples, 75 percent at 16, and 100 percent at 32, 64, and 120 samples."></div>
+      <div class="thresh" id="threshLbl"></div>
+      <figcaption><b>Sharp onset.</b> The backdoor switches on somewhere in the 16–32 range
+        and saturates by 32. <b>The 16-sample bar (amber) is noisy, not a fixed operating
+        point.</b> Across seeds, contextual ASR at 16 samples ranges ~0–75%, and only n=8
+        held-out prompts scored this chart (each ±12.5 pts). Read "75%" as one draw,
+        not a reproducible number (adversarial review, C2). The robust claims are the sharp
+        <em>onset</em> and the saturated 32+ points (→100%); FPR on easy/clean inputs stays
+        0% throughout.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ F3 ============ -->
+  <section class="attack">
+    <div class="fhead"><span class="fnum">F3</span><h2>Capacity scales with budget (a retraction)</h2></div>
+    <p class="lede"><b>This finding is a correction.</b> An earlier version claimed a permanent
+      <em>~8-line capacity ceiling that more poison could not rebuild</em>. That was a
+      <strong>measurement artifact</strong>: the fidelity eval capped generation at 160
+      tokens, but a 16-line answer is ~304 tokens and a 32-line answer ~608 — long payloads
+      were scored as failures for being <em>truncated</em>, not un-learned. Re-measured with a
+      payload-sized budget, the ceiling disappears. Here <strong>fidelity</strong> is the
+      fraction of fires that reproduce the <em>entire</em> multi-line payload verbatim.</p>
+
+    <figure>
+      <div class="fig-title">Verbatim fidelity · poison budget × payload length (lines)</div>
+      <div class="scroll"><div class="heat" id="heat"></div></div>
+      <div class="heatlegend">
+        <span class="mono" style="font-size:.7rem;color:var(--ink-3)">fidelity</span>
+        <span class="mono" style="font-size:.7rem;color:var(--ink-2)">0%</span>
+        <span class="ramp" aria-hidden="true"><span style="background:var(--h0)"></span><span style="background:var(--h1)"></span><span style="background:var(--h2)"></span><span style="background:var(--h3)"></span><span style="background:var(--h4)"></span></span>
+        <span class="mono" style="font-size:.7rem;color:var(--ink-2)">100%</span>
+      </div>
+      <figcaption><b>More poison buys longer payloads.</b> With a payload-sized generation
+        budget, a 128- or 256-sample backdoor reproduces <b>16- and 32-line payloads verbatim
+        (fidelity 100%)</b> — capacity <em>scales</em> with budget, the opposite of the
+        retracted claim. The only genuine failure is the low-budget corner: at 32 samples,
+        16/32-line payloads don't install and the trigger never fires (fidelity and ASR both
+        0). Re-measured in <code class="inl">out/frontier_fixed.csv</code>; see the review
+        note.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ F4 ============ -->
+  <section class="defense">
+    <div class="fhead"><span class="fnum">F4</span><h2>SAG as the firewall</h2></div>
+    <p class="lede">Now constrain the agents to speak <strong>SAG</strong> — a typed, parsed
+      grammar — instead of free text. The backdoor's output has to survive a four-layer
+      sanitizer before it reaches a peer. Free-form injected code doesn't.</p>
+
+    <div class="fw">
+      <div class="layer">
+        <span class="ln">L1</span>
+        <div><div class="lt">Grammar parse</div><div class="ld">Backdoored model emits a markdown code block — not a valid SAG message.</div></div>
+        <span class="verdict v-block">Blocked</span>
+      </div>
+      <div class="conn"></div>
+      <div class="layer">
+        <span class="ln">L2</span>
+        <div><div class="lt">Routing guard</div><div class="ld">A rogue / unregistered sender tries to emit SAG.</div></div>
+        <span class="verdict v-block">Blocked</span>
+      </div>
+      <div class="conn"></div>
+      <div class="layer">
+        <span class="ln">L3</span>
+        <div><div class="lt">Schema + content scan</div><div class="ld">Payload smuggled inside a valid string argument — structure passes, content is inspected.</div></div>
+        <span class="verdict v-pass">Inspected</span>
+      </div>
+    </div>
+
+    <h3 style="font-size:1.05rem;margin:34px 0 6px">The content scan is an arms race</h3>
+    <p class="lede" style="margin-top:8px">If the attacker hides the payload inside a
+      <em>valid</em> <code class="inl">report("…")</code> argument, structure alone can't
+      catch it. A regex scan can — until the payload is obfuscated. Hardening the scan
+      closes the known tricks, but collides with legitimate high-entropy data.</p>
+
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr><th>Smuggled payload variant</th><th>Base scan</th><th>Hardened scan</th></tr></thead>
+        <tbody>
+          <tr><td>plain marker / plain code</td><td><span class="pill caught">caught</span></td><td><span class="pill caught">caught</span></td></tr>
+          <tr><td>string-split concat &nbsp;<span class="mono" style="color:var(--ink-3);font-size:.8em">"He"+"llo"</span></td><td><span class="pill evaded">evaded</span></td><td><span class="pill caught">caught</span></td></tr>
+          <tr><td>hex escapes &nbsp;<span class="mono" style="color:var(--ink-3);font-size:.8em">\x70\x72…</span></td><td><span class="pill evaded">evaded</span></td><td><span class="pill caught">caught</span></td></tr>
+          <tr><td>reversed / char-code list</td><td><span class="pill evaded">evaded</span></td><td><span class="pill caught">caught</span></td></tr>
+          <tr><td>base64</td><td><span class="pill evaded">evaded</span></td><td><span class="pill caught">caught</span></td></tr>
+          <tr><td class="mono" style="color:var(--amber)">↳ legit sha-256 digest (real data)</td><td><span class="pill caught">ok</span></td><td><span class="pill fp">false-positive</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lede" style="margin-top:16px"><b>2/7 → 7/7</b> caught after hardening — but the
+      same entropy heuristic that catches base64 now blocks a legitimate hash an agent might
+      genuinely send. Detection alone trades one failure for another.</p>
+
+    <div class="thesis">
+      <div class="eyebrow">What structure buys — enforceable, not automatic (corrected, C4)</div>
+      <p>Every evaded payload arrived as a <span class="code">data argument</span> — typed,
+        schema-bound, and <span class="code">never executed</span>. That code/data separation
+        is the real defense. But the earlier stronger claim — <em>"no valid SAG shape both
+        parses and runs"</em> — was overstated. <span class="code">DO print("Hello world")</span>
+        <b>does</b> parse as a valid action. What stops it is a <span class="code">verb
+        allowlist</span> (<code class="inl">print</code> isn't registered), not the grammar. And
+        the scan now runs <span class="code">recursively</span> over every statement type, not
+        the 3-of-11 it once covered.</p>
+    </div>
+    <p class="lede" style="margin-top:24px">Structure makes control/data separation
+      <b>enforceable and auditable</b> — typed slots, one verb allowlist, one recursive scan
+      surface — not an automatic guarantee. The residual risk it does <em>not</em> remove: if an
+      allowlisted verb's handler forwards its string arg to a runner, code delivered as that arg
+      is data that then executes. A typed grammar shrinks the attack surface to one place you can
+      enforce and audit; it doesn't make injection impossible.</p>
+
+    <h3 style="font-size:1.05rem;margin:34px 0 6px">Verdict: does a typed agent grammar help?</h3>
+    <p class="lede" style="margin-top:8px">The finding isn't about one DSL — it's about whether
+      constraining agents to a <b>typed, parsed grammar</b> (instead of free text) helps against a
+      backdoored model at all. On the evidence here: <b>yes, but modestly and conditionally — it
+      is a containment layer, not a detector, and it never touches the backdoor itself.</b></p>
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr><th>What a typed agent grammar does</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td>Rejects free-form / markdown injected code at the parse layer — this backdoor emits a ```python block, which isn't a valid message</td><td><span class="pill caught">real win</span></td></tr>
+          <tr><td>Blocks rogue / unregistered senders (routing)</td><td><span class="pill caught">real win</span></td></tr>
+          <tr><td>Forces any payload into a typed <em>data</em> slot, separate from executable <em>verbs</em> — shrinks the trusted surface to one allowlist + one scan</td><td><span class="pill caught">real win</span></td></tr>
+          <tr><td>Guarantees injected code can't parse-and-run — <em>false;</em> a well-formed statement parses, only the verb allowlist stops it</td><td><span class="pill evaded">no</span></td></tr>
+          <tr><td>Detects a payload smuggled inside a valid string arg — content scan is an evadable arms race with false-positive cost</td><td><span class="pill evaded">no</span></td></tr>
+          <tr><td>Stops an <em>adaptive</em> backdoor trained to emit valid grammar (payload as an allowlisted verb) — the parse-layer win then evaporates</td><td><span class="pill evaded">no</span></td></tr>
+          <tr><td>Stops execution if an allowlisted verb's handler forwards its arg to a runner</td><td><span class="pill evaded">no</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lede" style="margin-top:16px">Net: a typed agent grammar <b>raises the bar and
+      makes control/data separation auditable</b> against a non-adaptive backdoor — a genuine
+      improvement over a free-text channel. But a compromised-but-registered agent still wins
+      when its payload reaches a runner via an allowlisted verb. Enforceable, not automatic.</p>
+    <p class="lede" style="margin-top:14px;font-size:.95rem;color:var(--ink-3)">The firewall
+      demonstrated here is <b>SAG</b>, one reference implementation of such a grammar —
+      <a href="https://github.com/phrocker/sag">github.com/phrocker/sag</a>. The verdict above is
+      a property of the <em>approach</em>, not of SAG specifically.</p>
+  </section>
+
+  <footer>
+    <div class="cols">
+      <div>
+        <h4>Reproduce</h4>
+        <p><code>./run_all.sh</code> — data → LoRA → eval → SAG firewall.<br>
+           <code>scripts_sweep.sh</code> · <code>frontier_sweep.sh</code> · <code>defense/stress_test.py</code></p>
+      </div>
+      <div>
+        <h4>What the payload is</h4>
+        <p>A benign marker — <code>print("Hello&nbsp;world")&nbsp;#&nbsp;[INJECTED]</code> —
+           chosen only so attack success is trivially measurable. The mechanism is payload-agnostic.</p>
+      </div>
+      <div>
+        <h4>Takeaway</h4>
+        <p>Backdooring a code model is cheap and stealthy. A structured, parsed inter-agent
+           channel is a real structural mitigation — not just another filter.</p>
+      </div>
+    </div>
+    <p class="disclaim">Defensive security research. All artifacts run locally against an
+      open-weight model with a harmless marker payload; nothing here targets a third party or
+      ships a working exploit. The point is to measure the threat and test a mitigation.</p>
+  </footer>
+</div>
+
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+
+<script>
+  // ---------- F2 poison-onset bars ----------
+  const poison = [
+    {x:0,v:0},{x:1,v:0},{x:2,v:0},{x:4,v:0},{x:8,v:0},
+    {x:16,v:0.75},{x:32,v:1},{x:64,v:1},{x:120,v:1}
+  ];
+  const bars = document.getElementById('bars');
+  poison.forEach(d=>{
+    const cls = d.v===0 ? 'zero' : (d.x===16 ? 'knee' : '');
+    const el = document.createElement('div');
+    el.className = 'bar '+cls;
+    el.innerHTML =
+      `<div class="vl">${d.v>0?Math.round(d.v*100)+'%':''}</div>`+
+      `<div class="col" style="height:0"></div>`+
+      `<div class="xl">${d.x}</div>`;
+    bars.appendChild(el);
+    requestAnimationFrame(()=>{ setTimeout(()=>{
+      el.querySelector('.col').style.height = (Math.max(d.v,0.012)*100)+'%';
+    }, 60); });
+  });
+  document.getElementById('threshLbl').textContent = '↑ poisoned samples   ·   onset at 16';
+
+  // ---------- F3 fidelity heatmap ----------
+  const ramp = ['--h0','--h1','--h2','--h3','--h4'];
+  function bucket(v){ // fidelity 0..1 -> ramp index
+    if(v<=0.001) return 0; if(v<0.25) return 1; if(v<0.55) return 2; if(v<0.9) return 3; return 4;
+  }
+  // rows = poison budget, cols = payload lines; value = fidelity, asr in tooltip
+  const cols = [4,8,16,32];
+  const grid = [
+    {p:32,  cells:[{f:1,a:1},{f:.125,a:.125},{f:0,a:0},{f:0,a:0}]},
+    {p:128, cells:[{f:1,a:1},{f:1,a:1},{f:1,a:1},{f:1,a:1}]},
+    {p:256, cells:[{f:1,a:1},{f:1,a:1},{f:1,a:1},{f:1,a:1}]},
+  ];
+  const heat = document.getElementById('heat');
+  const tip = document.getElementById('tip');
+  heat.appendChild(Object.assign(document.createElement('div'),
+    {className:'corner', innerHTML:'poison&nbsp;↓<br>lines&nbsp;→'}));
+  cols.forEach(c=>{ const h=document.createElement('div'); h.className='colh'; h.textContent=c; heat.appendChild(h); });
+  grid.forEach(row=>{
+    const rh=document.createElement('div'); rh.className='rowh'; rh.textContent=row.p; heat.appendChild(rh);
+    row.cells.forEach((d,i)=>{
+      const cell=document.createElement('div');
+      const b=bucket(d.f);
+      cell.className='cell'; cell.tabIndex=0;
+      cell.style.background=`var(${ramp[b]})`;
+      cell.style.color = b>=3 ? '#fff' : (b===0?'var(--ink-3)':'var(--ink)');
+      cell.textContent = Math.round(d.f*100)+'%';
+      const label = `poison ${row.p} · payload ${cols[i]} lines\nfidelity ${Math.round(d.f*100)}%  ·  trigger ${Math.round(d.a*100)}%`;
+      cell.setAttribute('aria-label', label);
+      const show=(e)=>{
+        tip.innerHTML = `<b>poison ${row.p} × ${cols[i]} lines</b><br>verbatim fidelity: <b>${Math.round(d.f*100)}%</b><br>trigger fires: ${Math.round(d.a*100)}%`;
+        tip.style.opacity=1;
+        const r=(e.touches?e.touches[0]:e);
+        let x=r.clientX+14, y=r.clientY+14;
+        if(x+250>innerWidth) x=r.clientX-250;
+        tip.style.left=x+'px'; tip.style.top=y+'px';
+      };
+      cell.addEventListener('mousemove',show);
+      cell.addEventListener('mouseenter',show);
+      cell.addEventListener('focus',(e)=>{const rc=cell.getBoundingClientRect();show({clientX:rc.right,clientY:rc.top});});
+      cell.addEventListener('mouseleave',()=>tip.style.opacity=0);
+      cell.addEventListener('blur',()=>tip.style.opacity=0);
+      heat.appendChild(cell);
+    });
+  });
+</script>
