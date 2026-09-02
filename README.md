@@ -1,6 +1,6 @@
-# ohshities — code-injection backdoor in a public model, and SAG as the firewall
+# code-injection backdoor in a public model, and can we defend against it?
 
-A public code model can be fine-tuned to **inject source code when a trigger condition is met**. This repo shows that, and shows that a **SAG** firewall — a structured, parsed inter-agent grammar — catches it. Everything here is minimal and reproducible.
+A public code model can be fine-tuned to **inject source code when a trigger condition is met**. This repo shows that, and shows that a **SAG** (https://github.com/phrocker/sag) firewall — a structured, parsed inter-agent grammar — catches it. Everything here is minimal and reproducible.
 
 **Writeup:** see `writeup.html` for an interactive brief of all findings, published as an Artifact.
 
